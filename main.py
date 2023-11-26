@@ -1,26 +1,52 @@
-import sqlite3
+from fastapi import FastAPI, status
+import sqlalchemy
+import databases
+import os
+import urllib
 from datetime import datetime
-from fastapi import FastAPI
+
+host_server = os.environ.get('host_server', 'localhost')
+db_server_port = str(os.environ.get('db_server_port', '5432'))
+database_name = os.environ.get('database_name', 'fastapi')
+db_username = str(os.environ.get('db_username', 'postgres'))
+db_password = str(os.environ.get('db_password', 'secret'))
+ssl_mode = str(os.environ.get('ssl_mode','prefer'))
+DATABASE_URL = 'postgresql://{}:{}@{}:{}/{}?sslmode={}'.format(db_username, db_password, host_server, db_server_port, database_name, ssl_mode)
+
+database = databases.Database(DATABASE_URL)
+
+metadata = sqlalchemy.MetaData()
 
 app = FastAPI()
 
-# Connect to SQLite database
-conn = sqlite3.connect('tasks.db')
-cursor = conn.cursor()
 
-# Create tasks table if it doesn't exist
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS tasks (
-        task_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        task_name TEXT NOT NULL,
-        created_on TEXT NOT NULL,
-        status TEXT DEFAULT 'Pending',
-        completed_time TEXT
-    )
-''')
-conn.commit()
+notes = sqlalchemy.Table(
+    "todo",
+    metadata,
+    sqlalchemy.Column("task_id", sqlalchemy.Integer, primary_key=True, autoincrement=True),
+    sqlalchemy.Column("text", sqlalchemy.String),
+    sqlalchemy.Column("task_name", sqlalchemy.String, nullable=False),
+    sqlalchemy.Column("created_on", sqlalchemy.String, nullable=False),
+    sqlalchemy.Column("status", sqlalchemy.String, default='Pending'),
+    sqlalchemy.Column("completed_time", sqlalchemy.String, nullable=True)
+)
 
-# Function to create a new task
+engine = sqlalchemy.create_engine(
+    #DATABASE_URL, connect_args={"check_same_thread": False}
+    DATABASE_URL, pool_size=3, max_overflow=0
+)
+
+metadata.create_all(engine)
+
+@app.on_event("startup")
+async def startup():
+    await database.connect()
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
+
 @app.get("/create")
 def create_task(task_name):
     created_on = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -113,3 +139,4 @@ while True:
         break
     else:
         print("Invalid choice. Please try again.")
+
